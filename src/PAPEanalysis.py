@@ -161,6 +161,7 @@ if df.empty:
     st.stop()
 df = df.sort_values("timestamp")
 
+st.write("Current sheet columns:", list(df.columns)) # for debugging
 
 # Convert numeric fields
 num_cols = ["latency_ms", "flesch_ease", "fk_grade", "repeat_sim", "choices_count", "level"]
