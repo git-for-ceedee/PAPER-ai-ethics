@@ -425,8 +425,7 @@ def generate_story_with_openai(prompt, temperature=0.5, max_tokens=1000, selecte
     try:
         # Initialize client if not already done
         client = get_openai_client()
-        st.caption(f"Using OpenAI org: {openai.organization}, key prefix: {openai.api_key[:8]}")
-
+        st.caption(f"Using OpenAI org: {client.organization}, key prefix: {client.api_key[:8]}")
         
         # Ensure temperature is a float in valid range
         temp_value = float(temperature)
@@ -764,7 +763,8 @@ st.title("🎲 Pick-a-Path Ethics & Results")
 # Initialise LLM and Security Features
 try:
     client = get_openai_client()
-    st.caption(f"Using OpenAI org: {openai.organization}, key prefix: {openai.api_key[:8]}")
+    st.caption(f"Using OpenAI org: {client.organization}, key prefix: {client.api_key[:8]}")
+
 
     _ = client.models.list()
     st.sidebar.success("✅ Connected to LLM API")
