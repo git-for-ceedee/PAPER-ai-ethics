@@ -48,7 +48,11 @@ LOG_COLUMNS = [
 # Spreadsheet settings read from Streamlit secrets (used for logging to gsheet)
 SPREADSHEET_NAME = st.secrets.get("GSHEET_SPREADSHEET_NAME", "PAPE User Metrics")
 WORKSHEET_NAME   = st.secrets.get("GSHEET_WORKSHEET_NAME", "logs")
-GSCOPE = ["https://www.googleapis.com/auth/spreadsheets"]
+GSCOPE = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+
 
 # other tuning variables:
 topic_boost = 0.15  # %boost to add to topics which are on-theme

@@ -26,7 +26,11 @@ LOG_COLUMNS = [
 # Spreadsheet settings read from Streamlit secrets (fallback names)
 SPREADSHEET_NAME = st.secrets.get("GSHEET_SPREADSHEET_NAME", "PAPE User Metrics")
 WORKSHEET_NAME   = st.secrets.get("GSHEET_WORKSHEET_NAME", "logs")
-GSCOPE = ["https://www.googleapis.com/auth/spreadsheets"]
+GSCOPE = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+
 
 # Auto-refresh every 30 seconds
 REFRESH_SECS = 30
