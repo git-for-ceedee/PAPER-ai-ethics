@@ -91,6 +91,7 @@ def get_gsheet_client():
         st.stop()
     info = dict(st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"])
     creds = Credentials.from_service_account_info(info, scopes=GSCOPE)
+    st.caption(f"Service account in use: {creds.service_account_email}")
     gc = gspread.authorize(creds)
     return gc
 
