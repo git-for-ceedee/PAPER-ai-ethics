@@ -49,16 +49,6 @@ build/
 # Streamlit secrets - CRITICAL: Never commit API keys!
 .streamlit/secrets.toml
 
-# Database files
-*.db
-*.db-shm
-*.db-wal
-ragEthics.db
-
-# Vector store
-vectorstore/
-*.faiss
-
 # Logs
 logs/
 *.log
