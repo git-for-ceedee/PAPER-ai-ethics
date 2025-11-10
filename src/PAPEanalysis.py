@@ -72,7 +72,7 @@ def get_gsheet_client():
         st.error("Missing GOOGLE_SERVICE_ACCOUNT_JSON in Streamlit secrets.")
         st.stop()
     try:
-        info = json.loads(raw)
+        info = dict(st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"])
     except Exception as e:
         st.error(f"Malformed GOOGLE_SERVICE_ACCOUNT_JSON: {e}")
         st.stop()

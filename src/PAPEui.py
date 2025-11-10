@@ -89,7 +89,7 @@ def get_gsheet_client():
     if not raw:
         st.error("Missing GOOGLE_SERVICE_ACCOUNT_JSON in Streamlit secrets.")
         st.stop()
-    info = json.loads(raw)
+    info = dict(st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"])
     creds = Credentials.from_service_account_info(info, scopes=GSCOPE)
     gc = gspread.authorize(creds)
     return gc
