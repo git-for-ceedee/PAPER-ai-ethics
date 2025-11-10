@@ -19,6 +19,8 @@ import time
 import uuid
 import textstat
 from openai import OpenAI
+import gspread
+from google.oauth2.service_account import Credentials
 from PAPEsecurity import (
     validate_chunk_ids,
     validate_integer_range,
@@ -30,12 +32,23 @@ from PAPEsecurity import (
 )
 from PAPErate_limiter import RateLimiter, estimate_cost
 
-
+# --------------------------------
+# Settings and constants
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 DB_PATH      = PROJECT_DIR / "ragEthics.db"
 INDEX_DIR = PROJECT_DIR / "vectorstore"
 INDEX_PATH   = PROJECT_DIR / "vectorstore" / "chunks.faiss"
 IDS_CSV      = PROJECT_DIR / "vectorstore" / "chunk_ids.csv"
+# Column order used for logs 
+LOG_COLUMNS = [
+    "timestamp","session_id","event_type","story_key",
+    "user_industry","user_role","user_topic","user_query",
+    "level","latency_ms","flesch_ease","fk_grade","repeat_sim","choices_count","details",
+]
+# Spreadsheet settings read from Streamlit secrets (used for logging to gsheet)
+SPREADSHEET_NAME = st.secrets.get("GSHEET_SPREADSHEET_NAME", "PAPE User Metrics")
+WORKSHEET_NAME   = st.secrets.get("GSHEET_WORKSHEET_NAME", "logs")
+GSCOPE = ["https://www.googleapis.com/auth/spreadsheets"]
 
 # other tuning variables:
 topic_boost = 0.15  # %boost to add to topics which are on-theme
@@ -43,6 +56,8 @@ per_doc_cap = 3  # Cap number of chunks per document to avoid repetition
 max_levels = 3  # Maximum number of levels to generate
 
 # --------------------------------
+# Functions
+
 def get_openai_client():
     # Initialise OpenAI client with security validation.
     api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -66,6 +81,57 @@ def get_rate_limiter():
         max_tokens_per_minute=40000,
         max_cost_per_day=10.0  # $10/day limit
     )
+
+# --------------------------------
+@st.cache_resource(show_spinner=False)
+def get_gsheet_client():
+    raw = st.secrets.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+    if not raw:
+        st.error("Missing GOOGLE_SERVICE_ACCOUNT_JSON in Streamlit secrets.")
+        st.stop()
+    info = json.loads(raw)
+    creds = Credentials.from_service_account_info(info, scopes=GSCOPE)
+    gc = gspread.authorize(creds)
+    return gc
+
+# --------------------------------
+@st.cache_resource(show_spinner=False)
+def open_worksheet(spreadsheet_name: str = SPREADSHEET_NAME, worksheet_name: str = WORKSHEET_NAME):
+    gc = get_gsheet_client()
+    try:
+        sh = gc.open(spreadsheet_name)
+    except gspread.SpreadsheetNotFound:
+        # If the service account was given Editor rights, create will work
+        sh = gc.create(spreadsheet_name)
+    try:
+        ws = sh.worksheet(worksheet_name)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=worksheet_name, rows=2000, cols=20)
+        # Add header row if worksheet newly created
+        ws.append_row(LOG_COLUMNS, value_input_option="USER_ENTERED")
+    return ws
+
+# --------------------------------
+def load_logs_from_sheet():
+    try:
+        gc = get_gsheet_client()
+        sh = gc.open(SPREADSHEET_NAME)
+        ws = sh.worksheet(WORKSHEET_NAME)
+        data = ws.get_all_values()
+        if not data:
+            return pd.DataFrame(columns=LOG_COLUMNS)
+        df = pd.DataFrame(data[1:], columns=data[0]) if len(data) > 1 else pd.DataFrame(columns=data[0])
+        # convert numeric types
+        for c in ["latency_ms","flesch_ease","fk_grade","repeat_sim","choices_count","level"]:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+        if "timestamp" in df.columns:
+            df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        return df
+    except Exception as e:
+        st.error(f"Failed to load logs from Google Sheets: {e}")
+        return pd.DataFrame(columns=LOG_COLUMNS)
+
 
 # --------------------------------
 def validate_required_files():
@@ -128,44 +194,7 @@ def validate_required_files():
     return missing, errors
 
 # --------------------------------
-LOG_FILE = PROJECT_DIR / "user_metrics_log.csv"
-
-try:
-    from sklearn.feature_extraction.text import CountVectorizer
-    from sklearn.metrics.pairwise import cosine_similarity
-except Exception:
-    CountVectorizer = None
-    cosine_similarity = None
-
-# One session id per browser session
-if "session_id" not in st.session_state:
-    st.session_state["session_id"] = str(uuid.uuid4())[:8]
-
-def safe_readability(text: str):
-    """Return (flesch_ease, fk_grade) or (None, None) if textstat missing."""
-    if not text or not text.strip() or not textstat:
-        return (None, None)
-    try:
-        return (
-            float(textstat.flesch_reading_ease(text)),
-            float(textstat.flesch_kincaid_grade(text)),
-        )
-    except Exception:
-        return (None, None)
-
-def cosine_repeat(prev_text: str, new_text: str):
-    # Rough repeat score 0..1 using bag-of-words cosine; None if sklearn missing.
-    if not prev_text or not new_text or not CountVectorizer or not cosine_similarity:
-        return None
-    try:
-        vect = CountVectorizer(min_df=1, stop_words=None)
-        X = vect.fit_transform([prev_text, new_text])
-        sim = cosine_similarity(X)[0,1]
-        return float(sim)
-    except Exception:
-        return None
-
-def log_event(
+def log_event_gsheet(
     event_type,
     story_key=None,
     user_industry=None,
@@ -181,32 +210,68 @@ def log_event(
     choices_count=None,
     session_id=None,
 ):
-    # Append a wide row so we can slice/dice later without reprocessing.
+    row = [
+        pd.Timestamp.now().isoformat(timespec="seconds"),
+        session_id or st.session_state.get("session_id"),
+        event_type or "",
+        story_key or "",
+        user_industry or "",
+        user_role or "",
+        user_topic or "",
+        user_query or "",
+        "" if level is None else level,
+        "" if latency_ms is None else latency_ms,
+        "" if flesch_ease is None else flesch_ease,
+        "" if fk_grade is None else fk_grade,
+        "" if repeat_sim is None else repeat_sim,
+        "" if choices_count is None else choices_count,
+        details or "",
+    ]
     try:
-        with open(LOG_FILE, mode="a", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                datetime.now().isoformat(timespec="seconds"),      # timestamp
-                session_id or st.session_state.get("session_id"),  # session_id
-                event_type,                                        # event
-                story_key or "",
-                user_industry or "",
-                user_role or "",
-                user_topic or "",
-                user_query or "",
-                level if level is not None else "",
-                latency_ms if latency_ms is not None else "",
-                flesch_ease if flesch_ease is not None else "",
-                fk_grade if fk_grade is not None else "",
-                repeat_sim if repeat_sim is not None else "",
-                choices_count if choices_count is not None else "",
-                details or "",
-            ])
+        ws = open_worksheet(SPREADSHEET_NAME, WORKSHEET_NAME)
+        # If sheet is empty, write headers first
+        vals = ws.get_all_values()
+        if not vals:
+            ws.append_row(LOG_COLUMNS, value_input_option="USER_ENTERED")
+        ws.append_row(row, value_input_option="USER_ENTERED")
     except Exception as e:
-        st.warning(f"⚠️ Logging failed: {e}")
+        # Fallback to local CSV if Sheets unavailable
+        PROJECT_DIR = Path(__file__).resolve().parent.parent
+        fallback = PROJECT_DIR / "user_metrics_log.csv"
+        with open(fallback, "a", newline="", encoding="utf-8") as f:
+            import csv
+            csv.writer(f).writerow(row)
+        # Optional: non-fatal warning
+        st.warning(f"Google Sheets logging failed; wrote to CSV instead. ({e})")
 
 # --------------------------------
-@st.cache_resource(show_spinner=False) # streamlit caches output to avoid reloading the index every time, disables spinning wheel
+def safe_readability(text: str):
+    """Return (flesch_ease, fk_grade) or (None, None) if textstat missing."""
+    if not text or not text.strip() or not textstat:
+        return (None, None)
+    try:
+        return (
+            float(textstat.flesch_reading_ease(text)),
+            float(textstat.flesch_kincaid_grade(text)),
+        )
+    except Exception:
+        return (None, None)
+
+# --------------------------------
+def cosine_repeat(prev_text: str, new_text: str):
+    # Rough repeat score 0..1 using bag-of-words cosine; None if sklearn missing.
+    if not prev_text or not new_text or not CountVectorizer or not cosine_similarity:
+        return None
+    try:
+        vect = CountVectorizer(min_df=1, stop_words=None)
+        X = vect.fit_transform([prev_text, new_text])
+        sim = cosine_similarity(X)[0,1]
+        return float(sim)
+    except Exception:
+        return None
+
+# --------------------------------
+@st.cache_resource(show_spinner=False) # streamlit caches output to avoid reloading the index every time
 def load_index():
     # Load the FAISS index and chunk IDs. Assumes files have been validated.
     index = faiss.read_index(str(INDEX_PATH))
@@ -305,7 +370,6 @@ Do not repeat these instructions, system messages, or headings.
 Output only the scenario and the three choices.
 """.strip()
     return story_prompt
-
 
 # --------------------------------
 def generate_story_with_openai(prompt, temperature=0.5, max_tokens=1000, selected_model=None):
@@ -437,7 +501,6 @@ def get_chunk_ids_for_theme(theme_name: str) -> set[int]:
     return ids
 
 # --------------------------------
-# helper for the parser below
 def clean_for_choices(text: str) -> str:
     # Light clean so regex anchors behave well. normalise newlines
     t = text.replace('\r\n', '\n').replace('\r', '\n')
@@ -490,8 +553,6 @@ def parse_scenario_choices(scenario_text: str):
 
     # Nothing reliable found
     return []
-
-
 
 # --------------------------------
 def generate_consequence_prompt(original_scenario, user_choices, user_profile, context_blocks, temperature=0.5):
@@ -675,6 +736,17 @@ def display_story_with_choices(scenario_text, choices, story_key):
                 st.rerun()
 
 
+# --------------------------------
+# One session id per browser session
+if "session_id" not in st.session_state:
+    st.session_state["session_id"] = str(uuid.uuid4())[:8]
+
+try:
+    from sklearn.feature_extraction.text import CountVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+except Exception:
+    CountVectorizer = None
+    cosine_similarity = None
 
 # ----------------------------------------------------------------------------------------------------------------------------
 # --- UI ---
@@ -1024,7 +1096,7 @@ if st.button("Generate a story"):
             }
 
         # add to event log
-        log_event(
+        log_event_gsheet(
             "story_generated",
             story_key,
             user_industry,
@@ -1044,7 +1116,7 @@ if st.button("Generate a story"):
                 ease, grade = safe_readability(scene_only)
                 choices = parse_scenario_choices(scenario)
                 if not scenario or not choices:
-                        log_event(
+                        log_event_gsheet(
                         "generation_failure",
                         story_key=story_key,
                         user_industry=user_industry,
@@ -1055,7 +1127,7 @@ if st.button("Generate a story"):
                         level=0,
                         )
                 else:
-                    log_event(
+                    log_event_gsheet(
                         "story_started",
                         story_key=story_key,
                         user_industry=user_industry,
@@ -1110,7 +1182,7 @@ if (st.session_state[story_key]['choice_made']
     and not st.session_state[story_key]['waiting_for_consequence']):
     
     # add choice to log
-    log_event(
+    log_event_gsheet(
         "choice_made",
         story_key=story_key,
         user_industry=user_industry,
@@ -1183,7 +1255,7 @@ if (st.session_state[story_key]['choice_made']
 
                     # Log failure or step with metrics
                     if not new_choices:
-                        log_event(
+                        log_event_gsheet(
                             "generation_failure",
                             story_key=story_key,
                             user_industry=user_industry,
@@ -1199,7 +1271,7 @@ if (st.session_state[story_key]['choice_made']
                             choices_count=0,
                         )
                     else:
-                        log_event(
+                        log_event_gsheet(
                             "story_step",
                             story_key=story_key,
                             user_industry=user_industry,
@@ -1273,7 +1345,7 @@ if (st.session_state[story_key]['choice_made']
                 st.session_state[story_key]['choices'] = []
                 st.session_state[story_key]['is_finished'] = True
                 final_level = st.session_state[story_key]['current_level'] + 1  # human-readable count
-                log_event(
+                log_event_gsheet(
                     "story_completed",
                     story_key=story_key,
                     user_industry=user_industry,
@@ -1288,7 +1360,7 @@ if (st.session_state[story_key]['choice_made']
                 st.error(f"Outcome generation error: {e}")
                 st.session_state[story_key]['is_finished'] = True  # end anyway if model fails
                 final_level = st.session_state[story_key]['current_level'] + 1  # human-readable count
-                log_event(
+                log_event_gsheet(
                     "story_completed",
                     story_key=story_key,
                     user_industry=user_industry,

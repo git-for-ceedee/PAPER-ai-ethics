@@ -5,10 +5,36 @@
 
 import pandas as pd
 import streamlit as st
+import json
+import gspread
+from google.oauth2.service_account import Credentials
 from pathlib import Path
 from datetime import timedelta
 
-# --- Helper functions ---
+# --- Setup ---
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+st.set_page_config(page_title="PAPE Analytics Dashboard", page_icon="📊", layout="wide")
+st.title("📊 Pick-a-Path AI Ethics Analytics Dashboard")
+
+# Column order used for logs (must match PAPEui logging)
+LOG_COLUMNS = [
+    "timestamp","session_id","event_type","story_key",
+    "user_industry","user_role","user_topic","user_query",
+    "level","latency_ms","flesch_ease","fk_grade","repeat_sim","choices_count","details",
+]
+
+# Spreadsheet settings read from Streamlit secrets (fallback names)
+SPREADSHEET_NAME = st.secrets.get("GSHEET_SPREADSHEET_NAME", "PAPE User Metrics")
+WORKSHEET_NAME   = st.secrets.get("GSHEET_WORKSHEET_NAME", "logs")
+GSCOPE = ["https://www.googleapis.com/auth/spreadsheets"]
+
+# Auto-refresh every 30 seconds
+REFRESH_SECS = 30
+st.markdown(f"<meta http-equiv='refresh' content='{REFRESH_SECS}'>", unsafe_allow_html=True)
+st.caption(f"🔄 Auto-refresh active — updates every {REFRESH_SECS} seconds")
+
+# --------------------------------
+# Functions
 def trend_arrow(curr, prev, higher_is_better=True):
     if prev is None or pd.isna(prev):
         return "↔︎"
@@ -38,14 +64,74 @@ def colourise(value, good_thresh=None, warn_thresh=None, invert=False):
         colour = "#b00020"
     return f"<span style='color:{colour}'><b>{v:.1f}</b></span>"
 
-# --- Setup ---
-PROJECT_DIR = Path(__file__).resolve().parent.parent
-LOG_FILE = PROJECT_DIR / "user_metrics_log.csv"
+# -----------------------
+@st.cache_resource
+def get_gsheet_client():
+    raw = st.secrets.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+    if not raw:
+        st.error("Missing GOOGLE_SERVICE_ACCOUNT_JSON in Streamlit secrets.")
+        st.stop()
+    try:
+        info = json.loads(raw)
+    except Exception as e:
+        st.error(f"Malformed GOOGLE_SERVICE_ACCOUNT_JSON: {e}")
+        st.stop()
+    creds = Credentials.from_service_account_info(info, scopes=GSCOPE)
+    gc = gspread.authorize(creds)
+    return gc
 
-st.set_page_config(page_title="PAPE Analytics Dashboard", page_icon="📊", layout="wide")
-st.title("📊 Pick-a-Path AI Ethics Analytics Dashboard")
+# -----------------------
+@st.cache_resource
+def open_worksheet(spreadsheet_name: str = SPREADSHEET_NAME, worksheet_name: str = WORKSHEET_NAME):
+    gc = get_gsheet_client()
+    try:
+        sh = gc.open(spreadsheet_name)
+    except gspread.SpreadsheetNotFound:
+        # try to create (requires the service account to have permission)
+        sh = gc.create(spreadsheet_name)
+    try:
+        ws = sh.worksheet(worksheet_name)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=worksheet_name, rows=2000, cols=20)
+        # write header row
+        ws.append_row(LOG_COLUMNS, value_input_option="USER_ENTERED")
+    return ws
 
-# --- Load and clean data ---
+# -----------------------
+def load_logs_from_sheet():
+    """
+    Return a pandas DataFrame loaded from the Google Sheet.
+    Columns and types normalised to expected names.
+    """
+    try:
+        ws = open_worksheet(SPREADSHEET_NAME, WORKSHEET_NAME)
+        data = ws.get_all_values()
+        if not data or len(data) <= 1:
+            # empty or only header
+            return pd.DataFrame(columns=LOG_COLUMNS)
+        df = pd.DataFrame(data[1:], columns=data[0])
+        # convert numeric fields safely
+        for c in ["latency_ms", "flesch_ease", "fk_grade", "repeat_sim", "choices_count", "level"]:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+        if "timestamp" in df.columns:
+            df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        return df
+    except Exception as e:
+        st.error(f"Failed to load logs from Google Sheets: {e}")
+        return pd.DataFrame(columns=LOG_COLUMNS)
+
+# -----------------------
+def apply_filters(d):
+    if f_role != "(all)":
+        d = d[d["user_role"] == f_role]
+    if f_ind != "(all)":
+        d = d[d["user_industry"] == f_ind]
+    if f_top != "(all)":
+        d = d[d["user_topic"] == f_top]
+    return d
+
+# -----------------------
 cols = [
     "timestamp",
     "session_id",
@@ -64,13 +150,13 @@ cols = [
     "details",
 ]
 
-if not LOG_FILE.exists():
-    st.warning("⚠️ No log file found yet — run the main app to generate data.")
+# Load logs from Google Sheets (live)
+df = load_logs_from_sheet()
+if df.empty:
+    st.warning("⚠️ No logs found in Google Sheets yet. Generate a few stories in the main app first.")
     st.stop()
-
-df = pd.read_csv(LOG_FILE, header=None, names=cols, encoding="utf-8")
-df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
 df = df.sort_values("timestamp")
+
 
 # Convert numeric fields
 num_cols = ["latency_ms", "flesch_ease", "fk_grade", "repeat_sim", "choices_count", "level"]
@@ -82,15 +168,6 @@ with st.expander("Filters"):
     f_role = st.selectbox("Role", ["(all)"] + sorted(df["user_role"].dropna().unique().tolist()))
     f_ind  = st.selectbox("Industry", ["(all)"] + sorted(df["user_industry"].dropna().unique().tolist()))
     f_top  = st.selectbox("Topic", ["(all)"] + sorted(df["user_topic"].dropna().unique().tolist()))
-
-def apply_filters(d):
-    if f_role != "(all)":
-        d = d[d["user_role"] == f_role]
-    if f_ind != "(all)":
-        d = d[d["user_industry"] == f_ind]
-    if f_top != "(all)":
-        d = d[d["user_topic"] == f_top]
-    return d
 
 df = apply_filters(df)
 
@@ -158,14 +235,36 @@ st.line_chart(df_curr.set_index("timestamp")["latency_ms"])
 
 st.subheader("Reading Ease (FRE) by Scene")
 st.bar_chart(df_curr["flesch_ease"].dropna())
+st.caption("FRE guide: 80–100 very easy • 60–80 easy/moderate • 30–60 hard • 0–30 very hard")
 
+# turn values into 0-100 scale for better visualisation
 st.subheader("Repeat Similarity Between Scenes")
-st.bar_chart(df_curr["repeat_sim"].dropna())
+rep = df_curr["repeat_sim"].dropna()
+rep_pct = (rep * 100).clip(0, 100)
+st.bar_chart(rep_pct)
+st.caption("Repeat similarity: 0 = unique scenes, 100 = near-identical text. Lower is better.")
 
 # --- Event breakdown ---
 st.subheader("Event Type Counts")
 event_counts = df["event_type"].value_counts()
-st.dataframe(event_counts)
+pretty_labels = {
+    "choice_made": "Number of click-throughs",
+    "story_started": "Stories started",
+    "story_completed": "Stories completed",
+    "generation_failure": "Generation failures",
+    "generation_error": "Generation errors",
+}
+ec_df = event_counts.rename(index=lambda k: pretty_labels.get(k, k))
+st.dataframe(ec_df)
+
+st.subheader("Deepest depth reached (per story)")
+depth_df = df.groupby("story_key")["level"].max().reset_index(name="max_level")
+st.dataframe(depth_df)
+st.line_chart(depth_df["max_level"])
+
+# Also show an aggregate:
+st.caption(f"Average deepest depth: {depth_df['max_level'].mean():.2f}")
+
 
 # --- Raw data + download ---
 with st.expander("🔍 Raw Log Data"):
