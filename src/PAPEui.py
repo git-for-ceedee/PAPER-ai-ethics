@@ -238,7 +238,7 @@ def log_event_gsheet(
         vals = ws.get_all_values()
         if not vals:
             ws.append_row(LOG_COLUMNS, value_input_option="USER_ENTERED")
-        ws.append_row(row, value_input_option="USER_ENTERED")
+        ws.append_row(row, value_input_option="USER_ENTERED", table_range="A1")
     except Exception as e:
         # Fallback to local CSV if Sheets unavailable
         PROJECT_DIR = Path(__file__).resolve().parent.parent
