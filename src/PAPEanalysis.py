@@ -74,6 +74,17 @@ with st.sidebar:
         progress = min(1.0, elapsed / refresh_interval)
         st.progress(progress, text=f"Next refresh in {int(remaining)}s")
 
+    # Close dashboard button
+    st.divider()
+    if st.button("❌ Close Dashboard", use_container_width=True):
+        st.markdown("""
+            <script>
+                window.close();
+            </script>
+        """, unsafe_allow_html=True)
+        st.success("✅ Dashboard session ended. You can now close this tab.")
+        st.caption("If the tab didn't close automatically, please close it manually.")
+
 # Auto-refresh logic
 if not st.session_state.refresh_paused:
     elapsed_time = time.time() - st.session_state.last_refresh_time
@@ -276,23 +287,18 @@ st.subheader("Theme (Topic) Distribution")
 topic_counts = df[df["event_type"] == "story_started"]["user_topic"].value_counts()
 st.bar_chart(topic_counts)
 
-st.subheader("User Journey Depth (Levels Reached)")
-depth_df = df.groupby("story_key")["level"].max().reset_index(name="max_level")
-depth_distribution = depth_df["max_level"].value_counts().sort_index()
-st.bar_chart(depth_distribution)
-st.caption("X-axis: Maximum level reached | Y-axis: Number of stories")
-
 st.subheader("Latency Over Time (ms)")
-st.line_chart(df_curr.set_index("timestamp")["latency_ms"])
+latency_over_time = df[df["latency_ms"].notna()].set_index("timestamp")["latency_ms"]
+st.line_chart(latency_over_time)
 
 st.subheader("Reading Ease (FRE) Over Time")
-fre_over_time = df_curr[df_curr["flesch_ease"].notna()].set_index("timestamp")["flesch_ease"]
+fre_over_time = df[df["flesch_ease"].notna()].set_index("timestamp")["flesch_ease"]
 st.line_chart(fre_over_time)
 st.caption("FRE guide: 80–100 very easy • 60–80 easy/moderate • 30–60 hard • 0–30 very hard")
 
 # turn values into 0-100 scale for better visualisation
 st.subheader("Repeat Similarity Over Time")
-rep_over_time = df_curr[df_curr["repeat_sim"].notna()].set_index("timestamp")["repeat_sim"]
+rep_over_time = df[df["repeat_sim"].notna()].set_index("timestamp")["repeat_sim"]
 rep_pct = (rep_over_time * 100).clip(0, 100)
 st.line_chart(rep_pct)
 st.caption("Repeat similarity: 0 = unique scenes, 100 = near-identical text. Lower is better.")
