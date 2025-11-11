@@ -9,7 +9,8 @@ import json
 import gspread
 from google.oauth2.service_account import Credentials
 from pathlib import Path
-from datetime import timedelta
+from datetime import datetime, timedelta
+import time
 
 # --- Setup ---
 PROJECT_DIR = Path(__file__).resolve().parent.parent
@@ -32,10 +33,55 @@ GSCOPE = [
 ]
 
 
-# Auto-refresh every 30 seconds
-REFRESH_SECS = 30
-st.markdown(f"<meta http-equiv='refresh' content='{REFRESH_SECS}'>", unsafe_allow_html=True)
-st.caption(f"🔄 Auto-refresh active — updates every {REFRESH_SECS} seconds")
+# --- Auto-refresh settings ---
+# Initialize session state
+if "last_refresh_time" not in st.session_state:
+    st.session_state.last_refresh_time = time.time()
+if "refresh_paused" not in st.session_state:
+    st.session_state.refresh_paused = False
+if "last_data_load" not in st.session_state:
+    st.session_state.last_data_load = datetime.now()
+
+# Refresh controls in sidebar
+with st.sidebar:
+    st.header("⚙️ Refresh Settings")
+    refresh_interval = st.slider(
+        "Refresh interval (seconds)",
+        min_value=30,
+        max_value=600,
+        value=30,
+        step=30,
+        help="How often the dashboard should auto-refresh data"
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("⏸️ Pause" if not st.session_state.refresh_paused else "▶️ Resume"):
+            st.session_state.refresh_paused = not st.session_state.refresh_paused
+    with col2:
+        if st.button("🔄 Refresh Now"):
+            st.session_state.last_refresh_time = time.time()
+            st.session_state.last_data_load = datetime.now()
+            st.rerun()
+
+    st.caption(f"{'⏸️ Auto-refresh paused' if st.session_state.refresh_paused else '✅ Auto-refresh active'}")
+    st.caption(f"Last updated: {st.session_state.last_data_load.strftime('%H:%M:%S')}")
+
+    # Show countdown progress
+    if not st.session_state.refresh_paused:
+        elapsed = time.time() - st.session_state.last_refresh_time
+        remaining = max(0, refresh_interval - elapsed)
+        progress = min(1.0, elapsed / refresh_interval)
+        st.progress(progress, text=f"Next refresh in {int(remaining)}s")
+
+# Auto-refresh logic
+if not st.session_state.refresh_paused:
+    elapsed_time = time.time() - st.session_state.last_refresh_time
+    if elapsed_time >= refresh_interval:
+        st.session_state.last_refresh_time = time.time()
+        st.session_state.last_data_load = datetime.now()
+        time.sleep(0.1)  # Brief pause to allow progress bar to complete
+        st.rerun()
 
 # --------------------------------
 # Functions
@@ -154,12 +200,13 @@ cols = [
     "details",
 ]
 
-# Load logs from Google Sheets (live)
-df = load_logs_from_sheet()
-if df.empty:
-    st.warning("⚠️ No logs found in Google Sheets yet. Generate a few stories in the main app first.")
-    st.stop()
-df = df.sort_values("timestamp")
+# Load logs from Google Sheets (live) with loading indicator
+with st.spinner("Loading data from Google Sheets..."):
+    df = load_logs_from_sheet()
+    if df.empty:
+        st.warning("⚠️ No logs found in Google Sheets yet. Generate a few stories in the main app first.")
+        st.stop()
+    df = df.sort_values("timestamp")
 
 # Convert numeric fields
 num_cols = ["latency_ms", "flesch_ease", "fk_grade", "repeat_sim", "choices_count", "level"]
@@ -231,20 +278,23 @@ st.bar_chart(topic_counts)
 
 st.subheader("User Journey Depth (Levels Reached)")
 depth_df = df.groupby("story_key")["level"].max().reset_index(name="max_level")
-st.line_chart(depth_df["max_level"])
+depth_distribution = depth_df["max_level"].value_counts().sort_index()
+st.bar_chart(depth_distribution)
+st.caption("X-axis: Maximum level reached | Y-axis: Number of stories")
 
 st.subheader("Latency Over Time (ms)")
 st.line_chart(df_curr.set_index("timestamp")["latency_ms"])
 
-st.subheader("Reading Ease (FRE) by Scene")
-st.bar_chart(df_curr["flesch_ease"].dropna())
+st.subheader("Reading Ease (FRE) Over Time")
+fre_over_time = df_curr[df_curr["flesch_ease"].notna()].set_index("timestamp")["flesch_ease"]
+st.line_chart(fre_over_time)
 st.caption("FRE guide: 80–100 very easy • 60–80 easy/moderate • 30–60 hard • 0–30 very hard")
 
 # turn values into 0-100 scale for better visualisation
-st.subheader("Repeat Similarity Between Scenes")
-rep = df_curr["repeat_sim"].dropna()
-rep_pct = (rep * 100).clip(0, 100)
-st.bar_chart(rep_pct)
+st.subheader("Repeat Similarity Over Time")
+rep_over_time = df_curr[df_curr["repeat_sim"].notna()].set_index("timestamp")["repeat_sim"]
+rep_pct = (rep_over_time * 100).clip(0, 100)
+st.line_chart(rep_pct)
 st.caption("Repeat similarity: 0 = unique scenes, 100 = near-identical text. Lower is better.")
 
 # --- Event breakdown ---
@@ -263,7 +313,9 @@ st.dataframe(ec_df)
 st.subheader("Deepest depth reached (per story)")
 depth_df = df.groupby("story_key")["level"].max().reset_index(name="max_level")
 st.dataframe(depth_df)
-st.line_chart(depth_df["max_level"])
+depth_distribution = depth_df["max_level"].value_counts().sort_index()
+st.bar_chart(depth_distribution)
+st.caption("X-axis: Maximum level reached | Y-axis: Number of stories")
 
 # Also show an aggregate:
 st.caption(f"Average deepest depth: {depth_df['max_level'].mean():.2f}")
