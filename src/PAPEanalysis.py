@@ -104,10 +104,10 @@ def trend_arrow(curr, prev, higher_is_better=True):
     else:
         return "↓" if curr < prev else ("↑" if curr > prev else "↔︎")
 
-def colourise(value, good_thresh=None, warn_thresh=None, invert=False):
+def colourise(value, good_thresh=None, warn_thresh=None, invert=False, suffix=""):
     # Traffic-light colouring for numeric metrics.
     if value is None or pd.isna(value):
-        return f"<span style='color:#999'>n/a</span>"
+        return f'<span style="color:#999">n/a</span>'
     v = float(value)
     if good_thresh is None and warn_thresh is None:
         good_thresh, warn_thresh = (0.33, 0.66)
@@ -123,7 +123,7 @@ def colourise(value, good_thresh=None, warn_thresh=None, invert=False):
         colour = "#b07000"
     else:
         colour = "#b00020"
-    return f"<span style='color:{colour}'><b>{v:.1f}</b></span>"
+    return f'<span style="color:{colour}"><b>{v:.1f}{suffix}</b></span>'
 
 # -----------------------
 @st.cache_resource
@@ -271,14 +271,14 @@ arrow_read = trend_arrow(avg_flesch_curr, avg_flesch_prev, higher_is_better=True
 arrow_rep  = trend_arrow(avg_repeat_curr, avg_repeat_prev, higher_is_better=False)
 
 # Colours
-fail_col = colourise(failure_rate_curr, good_thresh=5, warn_thresh=10, invert=True)
-lat_col  = colourise(avg_latency_curr, good_thresh=1200, warn_thresh=2500, invert=True)
+fail_col = colourise(failure_rate_curr, good_thresh=5, warn_thresh=10, invert=True, suffix="%")
+lat_col  = colourise(avg_latency_curr, good_thresh=1200, warn_thresh=2500, invert=True, suffix=" ms")
 read_col = colourise(avg_flesch_curr, good_thresh=60, warn_thresh=40)
 rep_col  = colourise(avg_repeat_curr, good_thresh=0.4, warn_thresh=0.7, invert=True)
 
 c1, c2, c3, c4 = st.columns(4)
-c1.markdown(f"**❌ Failure Rate**<br>{fail_col}% {arrow_fail}", unsafe_allow_html=True)
-c2.markdown(f"**⏱ Avg Latency**<br>{lat_col} ms {arrow_lat}", unsafe_allow_html=True)
+c1.markdown(f"**❌ Failure Rate**<br>{fail_col} {arrow_fail}", unsafe_allow_html=True)
+c2.markdown(f"**⏱ Avg Latency**<br>{lat_col} {arrow_lat}", unsafe_allow_html=True)
 c3.markdown(f"**🧠 Avg Readability (FRE)**<br>{read_col} {arrow_read}", unsafe_allow_html=True)
 c4.markdown(f"**🔁 Repeat Similarity**<br>{rep_col} {arrow_rep}", unsafe_allow_html=True)
 

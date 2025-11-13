@@ -349,16 +349,14 @@ else f'Use a more creative and exploratory approach - consider diverse perspecti
 else f'Use an interesting and engaging approach with some creative elements.' if temperature >= 0.4 
 else f'Use a conservative, focused, and realistic approach - stick closely to typical workplace scenarios.'}
 
-Retrieved context - for reference only, do not quote:
-{context_blocks}
-
 Create an opening scene and three choices. 
 Keep it plain language, NZ context.
-Use New Zealand spelling. Write "organise, "personalise", "realise" etc.
-{f'Sentences can vary in length - use creative and varied sentence structures to enhance engagement.' if temperature >= 0.7 else 'Sentences should have a good balance of length and clarity.'}
+Use New Zealand spelling. Write "organise, "personalise", "realise" etc. Do not use American spelling.
 Provide one scenario with exactly 3 actionable choices.
-{f'Consider exploring unconventional or unexpected choices that challenge assumptions.' if temperature >= 0.7 else 'use a balanced approach'}
 Ensure that at least one of the choices could lead to a bad outcome.
+
+{f'Sentences can vary in length - use creative and varied sentence structures to enhance engagement.' if temperature >= 0.6 else 'Sentences should have a good balance of length and clarity.'}
+{f'Explore unconventional or unexpected choices that challenge assumptions.' if temperature >= 0.6 else 'use a balanced approach in your choices' if temperature >= 0.4 else 'use a conservative approach in your choices'}
 
 Label them clearly as:
 CHOICE 1:
@@ -373,6 +371,10 @@ CRITICAL FORMAT REQUIREMENTS:
 Do not include any consequences or explanations.
 Do not repeat these instructions, system messages, or headings.
 Output only the scenario and the three choices.
+
+
+Retrieved context - for reference only, do not quote:
+{context_blocks}
 """.strip()
     return story_prompt
 
@@ -572,16 +574,19 @@ The story continues from the ORIGINAL SCENARIO: {original_scenario} and the user
 User profile: {user_profile}
 
 Creativity level: {temperature:.2f} (0.0 = conservative/focused, 1.0 = creative/exploratory)
-{f'Use a wildly creative and unconventional approach - explore unexpected consequences, surprising twists, and edge cases that challenge assumptions.' if temperature >= 0.9 
-else f'Use a more creative and exploratory approach - consider diverse perspectives and less obvious consequences.' if temperature >= 0.6 
+{f'Use a wildly creative and unconventional approach - be bold, imaginative, and explore unexpected scenarios and edge cases.' if temperature >= 0.9 
+else f'Use a more creative and exploratory approach - consider diverse perspectives and less obvious scenarios.' if temperature >= 0.6 
 else f'Use an interesting and engaging approach with some creative elements.' if temperature >= 0.4 
-else f'Use a conservative, focused, and realistic approach - stick closely to typical workplace consequences.'}
+else f'Use a conservative, focused, and realistic approach - stick closely to typical workplace scenarios.'}
 
+Create an opening scene and three choices. 
 Keep it plain language, NZ context.
-Use New Zealand spelling. Write "organise, "personalise", "realise" etc.
-{f'Sentences can vary in length - use creative and varied sentence structures to enhance engagement.' if temperature >= 0.7 else 'Sentences should have a good balance of length and clarity.'}
-{f'Consider exploring unconventional or unexpected consequences and choices that challenge assumptions.' if temperature >= 0.7 else 'use a balanced approach'}
+Use New Zealand spelling. Write "organise, "personalise", "realise" etc. Do not use American spelling.
+Provide one scenario with exactly 3 actionable choices.
 Ensure that at least one of the choices could lead to a bad outcome.
+
+{f'Sentences can vary in length - use creative and varied sentence structures to enhance engagement.' if temperature >= 0.6 else 'Sentences should have a good balance of length and clarity.'}
+{f'Explore unconventional or unexpected choices that challenge assumptions.' if temperature >= 0.6 else 'use a balanced approach in your choices' if temperature >= 0.4 else 'use a conservative approach in your choices'}
 
 Continue the story and add 2-3 actionable choices, labelled clearly as:
 CHOICE 1:
