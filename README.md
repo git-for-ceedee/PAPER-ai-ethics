@@ -22,6 +22,8 @@ The analytics dashboard will show options on the left and several graphs. It inc
 •	Deepest depth reached – how far did the person go into the story (max. 3 levels). Gives a rough indication of how deeply users engage with content. In the absence of direct observation, this is a proxy for user engagement.
 Should you wish for further information, this link will give you the full repository, including a copy of the code, the database and raw data files. This is the repository on which the live system is operating.
 Git repository: https://github.com/git-for-ceedee/PAPER-ai-ethics 
+Updated so that it doesn't get deleted.
+
 1.3	File structure
 Pick_a_path_AI_ethics/
 ├── src/
