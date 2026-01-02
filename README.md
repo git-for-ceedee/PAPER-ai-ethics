@@ -139,3 +139,4 @@ Note: This application is designed for educational and training purposes. Always
 There are no known bugs in the executables. This is all my own work with tutoring assistance from chat-GPT and Claude. Security checks & updates by Claude Code.
 1.6.1	License
 The programme is available for anyone to use – CC BY-NC-SA licence.
+* note added to prevent deletion
